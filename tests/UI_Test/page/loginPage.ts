@@ -1,8 +1,8 @@
 // Import Locator and Page from Playwright.
-import { Locator, Page } from "@playwright/test";
+import { Locator, Page } from '@playwright/test';
 
 // Import BasePage because LoginPage extends it.
-import { BasePage } from "./BasePage";
+import { BasePage } from './BasePage';
 
 // extends
 // LoginPage inherits everything from BasePage.
@@ -28,11 +28,11 @@ export class LoginPage extends BasePage {
     // Without super(page), you'll get an error.
     super(page);
 
-    this.my_account_Btn = page.getByRole("button", {
-      name: "My account",
+    this.my_account_Btn = page.getByRole('button', {
+      name: 'My account',
     });
-    this.email_box = page.getByPlaceholder("E-Mail Address");
-    this.password_box = page.getByPlaceholder("Password");
+    this.email_box = page.getByPlaceholder('E-Mail Address');
+    this.password_box = page.getByPlaceholder('Password');
     this.submit_btn = page.locator("input[value='Login']");
   }
 

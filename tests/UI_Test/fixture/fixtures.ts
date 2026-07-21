@@ -1,6 +1,6 @@
-import { test as base } from "playwright-bdd";
-import * as Pages from "../page/index";
-import { Page } from "@playwright/test";
+import { test as base } from 'playwright-bdd';
+import * as Pages from '../page/index';
+import { Page } from '@playwright/test';
 
 type myFixtures = {
   logInPage: Pages.LoginPage;
@@ -68,7 +68,7 @@ const createTestFunction =
   <T extends new (page: Page) => InstanceType<T>>(PageClass: T) =>
   (
     { page }: { page: Page },
-    use: (fixture: InstanceType<T>) => Promise<void>,
+    use: (fixture: InstanceType<T>) => Promise<void>
   ) =>
     use(new PageClass(page));
 

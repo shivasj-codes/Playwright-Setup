@@ -2,14 +2,52 @@
   "name": "playwright-setup",
   "version": "1.0.0",
   "main": "index.js",
-  "scripts": {},
+  "scripts": {
+    "lint:ts": "eslint \"tests/**/*.{ts,js}\"",
+    "lint:feature": "node lint-features.js",
+    "lint": "npm run lint:ts && npm run lint:feature",
+    "lint:fix": "eslint \"tests/**/*.{ts,js}\" --fix",
+    "prepare": "husky",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "test": "npx bddgen && npx playwright test",
+    "allure-report": "allure generate allure-results --clean -o allure-report && allure open allure-report",
+    "report:bdd": "npx ts-node generateReport.ts"
+  },
+  "lint-staged": {
+    "*.ts": [
+      "eslint --fix tests/**/*.ts",
+      "prettier --write tests/**/*.ts"
+    ],
+    "*.feature": [
+      "node lint-features.js",
+      "prettier --write"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
+  },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@eslint/json": "^2.0.1",
     "@playwright/test": "^1.61.1",
     "@types/node": "^26.1.1",
-    "playwright-bdd": "^9.2.0"
+    "@typescript-eslint/eslint-plugin": "^8.64.0",
+    "@typescript-eslint/parser": "^8.64.0",
+    "eslint": "^10.7.0",
+    "eslint-plugin-playwright": "^2.10.5",
+    "gherkin-lint-plus": "^1.0.2",
+    "globals": "^17.7.0",
+    "husky": "^9.1.7",
+    "jiti": "^2.7.0",
+    "lint-staged": "^16.4.0",
+    "playwright-bdd": "^9.2.0",
+    "prettier": "3.9.5",
+    "prettier-plugin-gherkin": "^4.0.0",
+    "typescript-eslint": "^8.64.0"
   }
 }

@@ -1,7 +1,7 @@
 // Import the Page class from Playwright.
 // Page represents one browser tab.
 // Without importing Page, TypeScript doesn't know what "Page" is.
-import { Page } from "@playwright/test";
+import { Page } from '@playwright/test';
 
 // export -> Makes this class usable in other files.
 // class -> Blueprint/template.
