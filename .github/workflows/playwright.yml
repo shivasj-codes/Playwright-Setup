@@ -544,4 +544,17 @@ jobs:
             echo "| Branch | ${{ github.head_ref || github.ref_name }} |"
             echo "| Commit | ${{ github.sha }} |"
             echo "| Duration | ${DURATION}s |"
+            echo ""
+            echo "## 🔗 Report Links"
+            echo ""
+            if [ -n "${{ steps.netlify-deploy.outputs.deploy_url }}" ]; then
+              echo "- **Allure report (Netlify):** ${{ steps.netlify-deploy.outputs.deploy_url }}"
+            else
+              echo "- **Allure report (Netlify):** not deployed this run"
+            fi
+            if [ -n "${{ env.pages_url }}" ]; then
+              echo "- **Cucumber report (GitHub Pages):** ${{ env.pages_url }}"
+            else
+              echo "- **Cucumber report (GitHub Pages):** not deployed this run"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
