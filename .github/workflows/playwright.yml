@@ -466,10 +466,10 @@ jobs:
         if: success() # only bother building this if tests actually ran and Netlify already deployed above
         run: |
           echo "Generating Cucumber HTML report..."
-          if ! npm run report:bdd; then
+          if ! npm run multiple-cucumber-report:bdd; then
             echo "❌ Cucumber HTML report generation failed."
             echo "Possible reasons:"
-            echo "- The 'report:bdd' script is missing from package.json"
+            echo "- The 'multiple-cucumber-report:bdd' script is missing from package.json"
             echo "- No cucumber JSON results were produced by the test run"
             echo ""
             echo "Note: this only blocks the GitHub Pages deploy below —"
