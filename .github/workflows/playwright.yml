@@ -449,7 +449,11 @@ jobs:
             echo "$DEPLOY_OUTPUT"
             exit 1
           fi
-          DEPLOY_URL=$(echo "$DEPLOY_OUTPUT" | grep -o 'https://[^ ]*' | head -n 1)
+          DEPLOY_URL=$(echo "$DEPLOY_OUTPUT" | grep -E 'Website (Draft )?URL:' | grep -oE 'https://[^ ]+' | head -n 1)
+          if [ -z "$DEPLOY_URL" ]; then
+            echo "⚠️  Could not parse the deployed URL from Netlify CLI output — falling back to any https link found."
+            DEPLOY_URL=$(echo "$DEPLOY_OUTPUT" | grep -oE 'https://[^ ]+' | head -n 1)
+          fi
           echo "deploy_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
           echo "✅ Netlify deployment completed."
           echo "Deployed URL: $DEPLOY_URL"
