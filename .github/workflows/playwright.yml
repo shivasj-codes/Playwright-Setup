@@ -1,4 +1,4 @@
-name: Playwright Tests suite
+name: Playwright Tests
 
 # 🧩 Trigger only for pull requests (no push runs)
 on:
