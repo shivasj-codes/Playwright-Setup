@@ -65,11 +65,11 @@ When('I scan the main content for accessibility issues', async ({ page }) => {
 });
 
 Then('there should be no accessibility violations', async ({}) => {
-  // Violations index, Violations Rule id, Violations impact, Violations description //helpurl
+  // Violations index, Violations Rule id, Violations impact, Violations description //helpUrl
   // Violations Element index, Violations selector, Violations html
   const violations = accessibilityScanResults.violations;
   console.log(
-    '\n=======================Accesibility Scan Reaport=====================\n'
+    '\n=======================Accessibility Scan Report=====================\n'
   );
   if (violations.length > 0) {
     console.log(`Total Violations = ${violations.length}`);
@@ -79,7 +79,7 @@ Then('there should be no accessibility violations', async ({}) => {
       console.log(`Rule id = ${v.id}`);
       console.log(`Impact = ${v.impact}`);
       console.log(`Description = ${v.description}`);
-      console.log(`Helpurl = ${v.helpUrl}`);
+      console.log(`HelpUrl = ${v.helpUrl}`);
 
       console.log('\nAffected Elements: \n');
 

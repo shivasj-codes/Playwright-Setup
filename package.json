@@ -54,5 +54,8 @@
     "prettier": "3.9.5",
     "prettier-plugin-gherkin": "^4.0.0",
     "typescript-eslint": "^8.64.0"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.12.1"
   }
 }
