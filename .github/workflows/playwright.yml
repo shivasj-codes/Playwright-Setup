@@ -300,14 +300,33 @@ jobs:
 
       - name: 🔎 Verify generated spec files
         run: |
-          GENERATED_COUNT=$(find . -name "*.spec.ts" -not -path "*/node_modules/*" | wc -l)
+          # This project's playwright.config.ts calls defineBddConfig()
+          # without an explicit `outputDir`, so playwright-bdd falls back
+          # to its default: ".features-gen" (a dot-directory, mirroring
+          # the features/steps structure). We check there directly, and
+          # fall back to a broader search in case outputDir is changed
+          # later, so this doesn't silently break on a config edit.
+          GENERATED_COUNT=$(find .features-gen -type f \( -name "*.spec.ts" -o -name "*.spec.js" \) 2>/dev/null | wc -l)
+
+          if [ "$GENERATED_COUNT" -eq 0 ]; then
+            echo "Nothing found in .features-gen, falling back to a repo-wide search..."
+            GENERATED_COUNT=$(find . \( -name "*.spec.ts" -o -name "*.spec.js" \) -not -path "*/node_modules/*" -type f | wc -l)
+          fi
           echo "Generated spec files: $GENERATED_COUNT"
 
           if [ "$GENERATED_COUNT" -eq 0 ]; then
-            echo "❌ No .spec.ts files were generated."
+            echo "❌ No generated spec files were found."
+            echo ""
             echo "Possible reasons:"
             echo "- bddgen ran but produced no output"
             echo "- Output directory is misconfigured in the playwright-bdd config"
+            echo "- Generated files use a naming/extension pattern this check doesn't recognize"
+            echo ""
+            echo "Diagnostic: repo contents after bddgen (excluding node_modules):"
+            find . -not -path "*/node_modules/*" -not -path "*/.git/*" -type f -newer package.json | sort
+            echo ""
+            echo "If your playwright-bdd config sets a custom outputDir, check it here:"
+            grep -rn "outputDir\|defineBddConfig" --include="*.ts" --include="*.js" . --exclude-dir=node_modules || echo "(no defineBddConfig usage found via grep)"
             exit 1
           fi
 
@@ -338,8 +357,14 @@ jobs:
 
       - name: 🧪 Run Playwright tests
         run: |
+          # NOTE (review): package.json's "test" script is
+          # "npx bddgen && npx playwright test" — since we already ran
+          # bddgen explicitly above (so we could validate its output
+          # before spending time on the full suite), calling
+          # `npx playwright test` directly here avoids generating the
+          # BDD tests a second time.
           echo "Running Playwright tests..."
-          if ! npm run test; then
+          if ! npx playwright test; then
             echo "❌ Playwright test execution failed."
             echo ""
             echo "Possible reasons:"
