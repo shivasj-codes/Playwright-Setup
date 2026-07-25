@@ -20,8 +20,6 @@ concurrency:
 
 jobs:
   test:
-    # ✅ Prevent duplicate push runs (safeguard)
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     container:
       image: mcr.microsoft.com/playwright:v1.56.1-noble
