@@ -21,6 +21,15 @@ const testDir = defineBddConfig({
   ],
 });
 
+const testAccessDir = defineBddConfig({
+  features: 'tests/Accessibility_Test/feature/**/*.feature',
+  steps: [
+    'tests/Accessibility_Test/steps/**/*.steps.ts',
+    'tests/Accessibility_Test/fixture/fixtures.ts',
+  ],
+  outputDir: 'accessibility-results',
+});
+
 export default defineConfig({
   testDir,
   /* Run tests in files in parallel */
@@ -54,6 +63,12 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+
+    {
+      name: 'accessibility-test',
+      testDir: testAccessDir,
+      use: { ...devices['Desktop Firefox'] },
     },
 
     // {
