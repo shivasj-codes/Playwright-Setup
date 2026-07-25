@@ -32,7 +32,7 @@ jobs:
 
       # 🧩 Node setup
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: lts/*
           cache: 'npm'
@@ -83,7 +83,7 @@ jobs:
       # 💾 Upload Allure report artifact
       - name: Upload Allure report as artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: allure-report-${{ steps.sanitize.outputs.safe_branch }}
           path: allure-report/
