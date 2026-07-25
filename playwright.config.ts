@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { defineBddConfig } from 'playwright-bdd';
+import { defineBddConfig, cucumberReporter } from 'playwright-bdd';
 
 /**
  * Read environment variables from file.
@@ -32,7 +32,12 @@ export default defineConfig({
   /* Opt out of parallel tests on CI. */
   workers: process.env.CI ? 1 : undefined,
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
-  reporter: [['html'], ['allure-playwright']],
+  reporter: [
+    ['html'],
+    ['allure-playwright'],
+    cucumberReporter('html', { outputFile: 'cucumber-report/index.html' }),
+    cucumberReporter('json', { outputFile: 'cucumber-report/result.json' }),
+  ],
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
     /* Base URL to use in actions like `await page.goto('')`. */
@@ -40,6 +45,8 @@ export default defineConfig({
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
+    screenshot: 'on',
+    video: 'on',
   },
 
   /* Configure projects for major browsers */

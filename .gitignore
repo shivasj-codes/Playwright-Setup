@@ -9,3 +9,5 @@ node_modules/
 .features-gen
 allure-results
 allure-report
+cucumber-report
+multiple-cucumber-html-reporter
