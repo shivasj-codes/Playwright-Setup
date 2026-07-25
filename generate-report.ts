@@ -1,48 +1,87 @@
-const report = require('multiple-cucumber-html-reporter');
 import os from 'os';
 import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { version as playwrightVersion } from 'playwright-core/package.json';
+
+// `multiple-cucumber-html-reporter` ships no TypeScript type declarations,
+// and `playwright-core/package.json` requires `resolveJsonModule: true` to
+// import as an ES module. Pulling both in with `require` avoids TS2307
+// errors without depending on a tsconfig flag that could change elsewhere
+// in the project. The version string is cast explicitly so it stays typed
+// from here on instead of leaking `any` into the rest of the file.
+
+const report = require('multiple-cucumber-html-reporter');
+
+const { version: playwrightVersion } =
+  require('playwright-core/package.json') as {
+    version: string;
+  };
 
 // --- Detect environment runtime info ---
-const platformName = os.type(); // 'Windows_NT', 'Darwin', 'Linux'
-const platformVersion = os.release();
-const deviceName = os.hostname();
-const nodeVersion = process.version;
+const platformName: string = os.type(); // 'Windows_NT', 'Darwin', 'Linux'
+const platformVersion: string = os.release();
+const deviceName: string = os.hostname();
+const nodeVersion: string = process.version;
 
 // Try to detect active git branch
 let gitBranch = 'unknown';
 try {
   gitBranch = execSync('git rev-parse --abbrev-ref HEAD').toString().trim();
-} catch (e) {
-  console.warn('⚠️ Git branch not found' + e);
+} catch (err) {
+  console.warn('⚠️ Git branch not found:', (err as Error).message);
+}
+
+// --- Minimal typed shape of the Cucumber JSON report ---
+// Only the fields this script actually reads are declared; everything else
+// in the report is left as `unknown` rather than guessed at.
+interface CucumberStep {
+  [key: string]: unknown;
+}
+
+interface CucumberElement {
+  steps?: CucumberStep[];
+  [key: string]: unknown;
+}
+
+interface CucumberFeature {
+  elements?: CucumberElement[];
+  [key: string]: unknown;
 }
 
 // Read the cucumber JSON results
 const jsonDir = path.join(__dirname, 'cucumber-report');
-const jsonPath = path.join(jsonDir, 'results.json');
+const jsonPath = path.join(jsonDir, 'result.json');
+
 let featureCount = 0;
 let scenarioCount = 0;
 let stepCount = 0;
 
 try {
-  const data = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+  const raw = fs.readFileSync(jsonPath, 'utf8');
+  const data: CucumberFeature[] = JSON.parse(raw);
+
   featureCount = data.length;
   for (const feature of data) {
-    scenarioCount += (feature.elements || []).length;
-    for (const scenario of feature.elements || []) {
-      stepCount += (scenario.steps || []).length;
+    const elements = feature.elements ?? [];
+    scenarioCount += elements.length;
+    for (const scenario of elements) {
+      stepCount += (scenario.steps ?? []).length;
     }
   }
 } catch (err) {
   console.error('❌ Could not read JSON report:', (err as Error).message);
 }
 
+// Opening a browser only makes sense on a developer's own machine. On a CI
+// runner (GitHub Actions and most other CI systems set CI=true) there is no
+// display to open one on, and trying to anyway is a likely source of stray
+// "about:blank" navigation. Only auto-open locally.
+const isCI = process.env.CI === 'true';
+
 report.generate({
-  jsonDir: jsonDir,
-  reportPath: 'cucumber-html-report/',
-  openReportInBrowser: true,
+  jsonDir,
+  reportPath: 'multiple-cucumber-html-reporter/',
+  openReportInBrowser: !isCI,
   displayDuration: true,
   displayReportTime: true,
   pageTitle: 'Playwright BDD Dashboard',
