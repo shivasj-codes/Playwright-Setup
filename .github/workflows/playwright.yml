@@ -1,136 +1,522 @@
 name: Playwright Tests
 
-# 🧩 Trigger only for pull requests (no push runs)
+# ─────────────────────────────────────────────────────────────────
+# TRIGGERS
+# ─────────────────────────────────────────────────────────────────
+# Branch → Environment mapping:
+#   develop      → Development
+#   qa/*         → QA
+#   release/*    → UAT
+#   main         → Production
+#   pull_request → Preview (temporary, deleted when PR closes)
+#   workflow_dispatch → manually pick any environment on demand
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment to run tests against'
+        required: true
+        type: choice
+        options:
+          - development
+          - qa
+          - uat
+          - production
+        default: development
+
+  push:
+    branches:
+      - develop
+      - 'qa/**'
+      - 'release/**'
+      - main
 
   pull_request:
     branches:
       - '**'
 
-# 🛡️ Permissions for GitHub Pages deploys + optional PR comments
+# ─────────────────────────────────────────────────────────────────
+# PERMISSIONS (least privilege)
+# ─────────────────────────────────────────────────────────────────
+# Default is read-only for every job. Jobs that actually need to
+# write (push gh-pages, comment on PRs) request it explicitly at
+# the job level below, instead of granting it workflow-wide.
 permissions:
-  contents: write # required to push to gh-pages
-  pull-requests: write # required to post PR comment URLs
+  contents: read
 
-# 🚦 Prevent multiple concurrent runs on same branch
+# ─────────────────────────────────────────────────────────────────
+# CONCURRENCY
+# ─────────────────────────────────────────────────────────────────
+# Cancels an in-progress run if a new commit lands on the same
+# branch, so we never burn CI minutes testing stale code.
 concurrency:
   group: playwright-tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  # ===================================================================
+  # JOB 1 — DETERMINE ENVIRONMENT
+  # ===================================================================
+  # A small, fast job (no container, no dependencies) that figures out
+  # which environment this run targets. Keeping this separate means
+  # the mapping logic lives in one place and is easy to read/audit,
+  # and it lets the heavy "test" job below use GitHub Environments
+  # (environment-scoped secrets/variables, approval gates, deployment
+  # history) based on the result.
+  determine-environment:
+    name: 🧭 Determine Target Environment
     runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.resolve.outputs.environment }}
+      safe_branch: ${{ steps.resolve.outputs.safe_branch }}
+    steps:
+      - name: 🔎 Resolve environment from branch/event
+        id: resolve
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🧭 Resolving deployment environment"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          RAW_BRANCH="${{ github.head_ref || github.ref_name }}"
+          echo "Raw branch/ref : $RAW_BRANCH"
+          echo "Event name     : ${{ github.event_name }}"
+
+          # Sanitize the branch name so it is safe to reuse later as an
+          # artifact name, a Netlify alias, and a URL path segment
+          # (letters, numbers, hyphens, underscores, dots only).
+          SAFE_BRANCH=$(echo "$RAW_BRANCH" | tr '/: ' '-' | tr -cd '[:alnum:]-_.')
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            # Manual runs let a human pick the environment explicitly —
+            # useful for re-validating QA/UAT on demand without a push.
+            ENVIRONMENT="${{ github.event.inputs.environment }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Every PR gets its own short-lived preview environment.
+            ENVIRONMENT="preview"
+          else
+            case "$RAW_BRANCH" in
+              main)       ENVIRONMENT="production" ;;
+              release/*)  ENVIRONMENT="uat" ;;
+              qa/*)       ENVIRONMENT="qa" ;;
+              develop)    ENVIRONMENT="development" ;;
+              *)          ENVIRONMENT="development" ;;
+            esac
+          fi
+
+          echo "Resolved environment : $ENVIRONMENT"
+          echo "Sanitized branch     : $SAFE_BRANCH"
+
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+          echo "safe_branch=$SAFE_BRANCH" >> "$GITHUB_OUTPUT"
+
+  # ===================================================================
+  # JOB 2 — BUILD, VALIDATE, TEST, REPORT, DEPLOY
+  # ===================================================================
+  test:
+    name: 🧪 Test & Report (${{ needs.determine-environment.outputs.environment }})
+    needs: determine-environment
+    runs-on: ubuntu-latest
+
+    # Binds this job to a GitHub Environment matching the resolved
+    # name (development/qa/uat/production/preview). This is what
+    # gives us "different secrets per environment" for free: secrets
+    # and variables defined under Settings → Environments → <name>
+    # are the ones resolved below, with no extra scripting needed.
+    # It also enables optional required-reviewer approval gates on
+    # sensitive environments like production, and a deployments tab
+    # with full history.
+    environment:
+      name: ${{ needs.determine-environment.outputs.environment }}
+      url: ${{ vars.TEST_BASE_URL }}
+
+    permissions:
+      contents: write # push the Cucumber report to gh-pages
+      pull-requests: write # comment report links back on the PR
+
     container:
+      # Pinned to an exact tag (not "latest") so a Playwright release
+      # can never silently change test behavior mid-run.
       image: mcr.microsoft.com/playwright:v1.56.1-noble
     timeout-minutes: 60
 
+    env:
+      NODE_VERSION: lts/*
+      JAVA_VERSION: '17' # Temurin 17 LTS — Allure CLI runs fine on it and 11 is nearing EOL
+      ENVIRONMENT: ${{ needs.determine-environment.outputs.environment }}
+      SAFE_BRANCH: ${{ needs.determine-environment.outputs.safe_branch }}
+      TEST_BASE_URL: ${{ vars.TEST_BASE_URL }}
+
     steps:
-      # 🧾 Checkout repo
-      - name: Checkout repository
+      # ---------------------------------------------------------------
+      # 0. WORKFLOW METADATA
+      # ---------------------------------------------------------------
+      - name: 🕒 Record workflow start time
+        id: start-time
+        run: echo "start_time=$(date +%s)" >> "$GITHUB_OUTPUT"
+
+      - name: 📋 Print run banner
+        run: |
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🚀 Starting Playwright Tests"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Branch       : ${{ github.head_ref || github.ref_name }}"
+          echo "Environment  : $ENVIRONMENT"
+          echo "Commit SHA   : ${{ github.sha }}"
+          echo "Triggered by : ${{ github.actor }}"
+          echo "Event        : ${{ github.event_name }}"
+          echo "Start time   : $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+      # ---------------------------------------------------------------
+      # 1. REPOSITORY SETUP
+      # ---------------------------------------------------------------
+      - name: 📥 Checkout repository
         uses: actions/checkout@v4
 
-      # 🧩 Node setup
-      - name: Setup Node.js
+      # ---------------------------------------------------------------
+      # 2. RUNTIME SETUP
+      # ---------------------------------------------------------------
+      - name: 🟢 Setup Node.js
         uses: actions/setup-node@v5
         with:
-          node-version: lts/*
-          cache: 'npm'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm' # caches ~/.npm keyed on package-lock.json
 
-      # inatall ts-node
-      - name: Install ts-node
-        run: npm install -g ts-node
+      - name: ☕ Setup Java (required by the Allure CLI)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+          # actions/setup-java gives version pinning + built-in caching,
+          # which is faster and more reliable than "apt-get install".
 
-      # 📦 Install dependencies
-      - name: Install dependencies
-        run: npm ci
-
-      # 🔍 Check generated test files
-      - name: Verify generated tests
+      - name: 🔍 Print toolchain versions
         run: |
-          npx bddgen
-          find . -name "*.spec.ts"
+          echo "Node version : $(node --version)"
+          echo "npm version  : $(npm --version)"
+          echo "Java version : $(java -version 2>&1 | head -n 1)"
 
-      # 🌍 Install Playwright browsers
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
-
-      # 🧪 Run Playwright tests
-      - name: Run Playwright tests
-        run: npm run test
-
-      # ☕ Install Java (for Allure)
-      - name: Install Java (for Allure)
+      # ---------------------------------------------------------------
+      # 3. FRAMEWORK VALIDATION (fail fast, before spending CI time)
+      # ---------------------------------------------------------------
+      - name: 🔐 Validate required secrets & variables
         run: |
-          apt-get update
-          apt-get install -y openjdk-11-jre
+          echo "Checking required configuration for environment: $ENVIRONMENT"
+          MISSING=0
 
-      # 🧰 Install Allure CLI
-      - name: Install Allure CLI globally
+          if [ -z "${{ secrets.NETLIFY_AUTH_TOKEN }}" ]; then
+            echo "❌ Missing secret: NETLIFY_AUTH_TOKEN"
+            MISSING=1
+          fi
+          if [ -z "${{ secrets.NETLIFY_SITE_ID }}" ]; then
+            echo "❌ Missing secret: NETLIFY_SITE_ID"
+            MISSING=1
+          fi
+          if [ -z "$TEST_BASE_URL" ]; then
+            echo "⚠️  TEST_BASE_URL is not set for the '$ENVIRONMENT' environment."
+            echo "   Tests will run, but any check that relies on this URL may fail."
+          fi
+
+          if [ "$MISSING" -eq 1 ]; then
+            echo ""
+            echo "❌ One or more required secrets are missing."
+            echo "Possible reasons:"
+            echo "- Secret not configured under Settings > Environments > $ENVIRONMENT"
+            echo "- Typo in the secret name"
+            echo "- Environment protection rules are blocking access"
+            exit 1
+          fi
+
+          echo "✅ All required secrets are present."
+
+      - name: 🗂️ Validate BDD framework files
         run: |
-          npm install -g allure-commandline
-          echo "$(npm root -g)/.bin" >> $GITHUB_PATH
-          allure --version
+          echo "Checking feature files and step definitions..."
+          FEATURE_COUNT=$(find . -name "*.feature" -not -path "*/node_modules/*" | wc -l)
+          echo "Feature files found: $FEATURE_COUNT"
 
-      # 🧾 Generate Allure report
-      - name: Generate Allure report
+          if [ "$FEATURE_COUNT" -eq 0 ]; then
+            echo "❌ No .feature files found in the repository."
+            echo "Possible reasons:"
+            echo "- Feature files were not committed"
+            echo "- Wrong working directory"
+            echo "- .feature files are excluded via .gitignore"
+            exit 1
+          fi
+
+          echo "✅ BDD framework files validated ($FEATURE_COUNT feature files)."
+
+      # ---------------------------------------------------------------
+      # 4. DEPENDENCY INSTALLATION
+      # ---------------------------------------------------------------
+      - name: 📦 Install dependencies
+        run: |
+          echo "Starting dependency installation..."
+          if ! npm ci; then
+            echo "❌ Dependency installation failed."
+            echo ""
+            echo "Possible reasons:"
+            echo "- package-lock.json is out of sync with package.json"
+            echo "- npm registry unavailable"
+            echo "- corrupted npm cache"
+            echo ""
+            echo "Please review the npm logs above."
+            exit 1
+          fi
+          echo "Dependencies installed successfully."
+          echo "✅ Dependencies installed successfully."
+
+      - name: 🛠️ Install ts-node
+        run: |
+          # NOTE (review): a global "npm install -g ts-node" works, but it
+          # is not pinned by package-lock.json, so the exact ts-node
+          # version can silently drift between runs. Prefer adding
+          # ts-node as a devDependency long-term for full reproducibility.
+          if ! npm install -g ts-node; then
+            echo "❌ ts-node installation failed. Please review the npm logs above."
+            exit 1
+          fi
+          echo "✅ ts-node installed ($(ts-node --version))."
+
+      # ---------------------------------------------------------------
+      # 5. BDD GENERATION
+      # ---------------------------------------------------------------
+      - name: 🧬 Generate BDD tests from feature files
+        run: |
+          echo "Generating BDD tests..."
+          if ! npx bddgen; then
+            echo "❌ BDD generation failed."
+            echo ""
+            echo "Possible reasons:"
+            echo "- Invalid or malformed .feature file syntax"
+            echo "- Missing or misconfigured playwright-bdd config"
+            echo "- Step definitions don't match feature file steps"
+            echo ""
+            echo "Please review the bddgen logs above."
+            exit 1
+          fi
+          echo "BDD generation completed."
+          echo "✅ BDD generation completed."
+
+      - name: 🔎 Verify generated spec files
+        run: |
+          GENERATED_COUNT=$(find . -name "*.spec.ts" -not -path "*/node_modules/*" | wc -l)
+          echo "Generated spec files: $GENERATED_COUNT"
+
+          if [ "$GENERATED_COUNT" -eq 0 ]; then
+            echo "❌ No .spec.ts files were generated."
+            echo "Possible reasons:"
+            echo "- bddgen ran but produced no output"
+            echo "- Output directory is misconfigured in the playwright-bdd config"
+            exit 1
+          fi
+
+          echo "✅ Generated test files verified ($GENERATED_COUNT spec files)."
+
+      # ---------------------------------------------------------------
+      # 6. PLAYWRIGHT EXECUTION
+      # ---------------------------------------------------------------
+      - name: 🌍 Install Playwright browsers
+        run: |
+          # NOTE (review): since this job already runs inside the
+          # official Playwright Docker image pinned to the same
+          # version as the npm package, browsers are normally
+          # pre-installed. This step is kept as cheap insurance
+          # against a version mismatch — it's close to a no-op when
+          # versions already match, so it isn't worth removing.
+          echo "Installing Playwright browsers..."
+          if ! npx playwright install --with-deps; then
+            echo "❌ Playwright browser installation failed."
+            echo ""
+            echo "Possible reasons:"
+            echo "- Network issue downloading browser binaries"
+            echo "- Missing OS-level dependencies"
+            echo "- Disk space exhausted on the runner"
+            exit 1
+          fi
+          echo "✅ Playwright browsers installed."
+
+      - name: 🧪 Run Playwright tests
+        run: |
+          echo "Running Playwright tests..."
+          if ! npm run test; then
+            echo "❌ Playwright test execution failed."
+            echo ""
+            echo "Possible reasons:"
+            echo "- One or more test assertions failed"
+            echo "- The application under test ($TEST_BASE_URL) was unreachable"
+            echo "- A test exceeded its configured timeout"
+            echo ""
+            echo "Review the Allure/Cucumber report generated below for full details."
+            exit 1
+          fi
+          echo "Playwright execution completed."
+          echo "✅ Tests executed successfully."
+
+      # ---------------------------------------------------------------
+      # 7. REPORT GENERATION
+      # ---------------------------------------------------------------
+      # These run on success OR failure so a report always exists,
+      # even for a red build — that's when it's needed most.
+      - name: 📊 Install Allure CLI
         if: success() || failure()
-        run: allure generate allure-results --clean -o allure-report
-
-      # 🧮 Sanitize branch name for URLs
-      - name: Sanitize branch name
-        id: sanitize
         run: |
-          RAW_BRANCH="${{ github.head_ref || github.ref_name }}"
-          SAFE_BRANCH=$(echo "$RAW_BRANCH" | tr '/: ' '-' | tr -cd '[:alnum:]-_.')
-          echo "Sanitized branch name: $SAFE_BRANCH"
-          echo "safe_branch=$SAFE_BRANCH" >> $GITHUB_OUTPUT
+          echo "Installing Allure CLI..."
+          if ! npm install -g allure-commandline; then
+            echo "❌ Allure CLI installation failed. Please review the npm logs above."
+            exit 1
+          fi
+          echo "$(npm root -g)/.bin" >> "$GITHUB_PATH"
+          echo "✅ Allure CLI installed ($(allure --version))."
 
-      # 💾 Upload Allure report artifact
-      - name: Upload Allure report as artifact
+      - name: 📊 Generate Allure report
+        if: success() || failure()
+        run: |
+          echo "Generating Allure report..."
+          if ! allure generate allure-results --clean -o allure-report; then
+            echo "❌ Allure report generation failed."
+            echo "Possible reasons:"
+            echo "- allure-results directory is empty or missing"
+            echo "- Corrupted result files from a crashed test run"
+            exit 1
+          fi
+          echo "Allure report generated successfully."
+          echo "✅ Allure report generated."
+
+      - name: 🥒 Generate Cucumber HTML report
+        if: success() || failure()
+        run: |
+          echo "Generating Cucumber HTML report..."
+          if ! npm run report:bdd; then
+            echo "❌ Cucumber HTML report generation failed."
+            echo "Possible reasons:"
+            echo "- The 'report:bdd' script is missing from package.json"
+            echo "- No cucumber JSON results were produced by the test run"
+            exit 1
+          fi
+          ls -R cucumber-html-report || echo "⚠️ cucumber-html-report folder not found."
+          echo "✅ Cucumber report generated."
+
+      # ---------------------------------------------------------------
+      # 8. ARTIFACT UPLOAD
+      # ---------------------------------------------------------------
+      - name: 💾 Upload Allure report artifact
         if: always()
         uses: actions/upload-artifact@v5
         with:
-          name: allure-report-${{ steps.sanitize.outputs.safe_branch }}
+          name: allure-report-${{ env.ENVIRONMENT }}-${{ env.SAFE_BRANCH }}
           path: allure-report/
           retention-days: 30
 
-      # 🚀 Deploy Allure report to Netlify
-      - name: Deploy Allure report to Netlify
+      - name: 🧾 Print artifact retention info
+        if: always()
+        run: |
+          echo "✅ Artifact uploaded."
+          echo "Artifact name    : allure-report-${ENVIRONMENT}-${SAFE_BRANCH}"
+          echo "Retention period : 30 days"
+          echo "Expires around   : $(date -u -d '+30 days' +'%Y-%m-%d') UTC"
+
+      # ---------------------------------------------------------------
+      # 9. DEPLOYMENT
+      # ---------------------------------------------------------------
+      - name: 🚀 Deploy Allure report to Netlify
+        id: netlify-deploy
         if: success()
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
         run: |
-          SAFE_BRANCH="${{ steps.sanitize.outputs.safe_branch }}"
-          echo "Deploying Allure for branch: $SAFE_BRANCH"
+          echo "Deploying Allure report — environment: $ENVIRONMENT, alias: $SAFE_BRANCH"
+          if ! DEPLOY_OUTPUT=$(npx netlify deploy --site "$SITE_ID" --alias "$SAFE_BRANCH" --dir allure-report 2>&1); then
+            echo "❌ Netlify deployment failed."
+            echo ""
+            echo "Possible reasons:"
+            echo "- Invalid or expired NETLIFY_AUTH_TOKEN"
+            echo "- Incorrect NETLIFY_SITE_ID"
+            echo "- Netlify service outage"
+            echo ""
+            echo "$DEPLOY_OUTPUT"
+            exit 1
+          fi
+          DEPLOY_URL=$(echo "$DEPLOY_OUTPUT" | grep -o 'https://[^ ]*' | head -n 1)
+          echo "deploy_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          echo "✅ Netlify deployment completed."
+          echo "Deployed URL: $DEPLOY_URL"
 
-          echo "🧪 Deploying preview Allure report for branch: $SAFE_BRANCH ..."
-          DEPLOY_URL=$(npx netlify deploy --site "$SITE_ID" --alias "$SAFE_BRANCH" --dir allure-report | grep -o 'https://[^ ]*')
-
-          echo "✅ Allure report deployed at: $DEPLOY_URL"
-
-      # ✅ Generate Cucumber HTML report
-      - name: Generate Cucumber HTML report
+      - name: 🌐 Deploy Cucumber HTML report to GitHub Pages
+        id: gh-pages-deploy
         if: success()
-        run: |
-          echo "🧪 Generating Cucumber HTML report..."
-          npm run report:bdd
-          ls -R cucumber-html-report || echo "⚠️ Folder not found"
-          echo "✅ Cucumber report generated."
-
-      # 🌐 Deploy Cucumber report to GitHub Pages
-      - name: Deploy Cucumber HTML report to GitHub Pages
-        if: success()
+        continue-on-error: true # let the next step print a clean diagnostic instead of a raw action failure
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./cucumber-html-report
-          destination_dir: cucumber-reports/${{ steps.sanitize.outputs.safe_branch }}
+          destination_dir: cucumber-reports/${{ env.ENVIRONMENT }}/${{ env.SAFE_BRANCH }}
 
-      # 🪶 Log deployed Cucumber report URL
-      - name: Log deployed Cucumber report URL
+      - name: 🌐 Verify GitHub Pages deployment
         if: success()
         run: |
-          echo "✅ Cucumber report deployed at:"
-          echo "https://testroverautomation.github.io/Playwright_Learning/cucumber-reports/${{ steps.sanitize.outputs.safe_branch }}/index.html"
+          if [ "${{ steps.gh-pages-deploy.outcome }}" != "success" ]; then
+            echo "❌ GitHub Pages deployment failed."
+            echo "Possible reasons:"
+            echo "- GitHub Pages is not enabled for this repository"
+            echo "- Branch protection rules on gh-pages"
+            echo "- GITHUB_TOKEN lacks contents:write permission"
+            exit 1
+          fi
+
+          PAGES_URL="https://${{ github.repository_owner }}.github.io/$(basename '${{ github.repository }}')/cucumber-reports/${ENVIRONMENT}/${SAFE_BRANCH}/index.html"
+          echo "pages_url=$PAGES_URL" >> "$GITHUB_ENV"
+          echo "✅ GitHub Pages deployment completed."
+          echo "Deployed URL: $PAGES_URL"
+
+      - name: 💬 Comment report links on pull request
+        if: github.event_name == 'pull_request' && success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = [
+              '### 📊 Test Reports Ready',
+              '',
+              `- **Allure Report:** ${{ steps.netlify-deploy.outputs.deploy_url }}`,
+              `- **Cucumber Report:** ${{ env.pages_url }}`,
+              '',
+              `Environment: \`${{ env.ENVIRONMENT }}\``
+            ].join('\n');
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      # ---------------------------------------------------------------
+      # 10. CLEANUP / SUMMARY
+      # ---------------------------------------------------------------
+      - name: 🧮 Print workflow summary
+        if: always()
+        run: |
+          END_TIME=$(date +%s)
+          START_TIME="${{ steps.start-time.outputs.start_time }}"
+          DURATION=$((END_TIME - START_TIME))
+
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "🏁 Workflow Summary"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "Environment    : $ENVIRONMENT"
+          echo "Branch         : ${{ github.head_ref || github.ref_name }}"
+          echo "Commit SHA     : ${{ github.sha }}"
+          echo "End time       : $(date -u +'%Y-%m-%d %H:%M:%S UTC')"
+          echo "Total duration : ${DURATION}s"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+          {
+            echo "## 🏁 Workflow Summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Environment | $ENVIRONMENT |"
+            echo "| Branch | ${{ github.head_ref || github.ref_name }} |"
+            echo "| Commit | ${{ github.sha }} |"
+            echo "| Duration | ${DURATION}s |"
+          } >> "$GITHUB_STEP_SUMMARY"
