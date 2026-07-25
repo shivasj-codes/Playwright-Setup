@@ -408,20 +408,6 @@ jobs:
           echo "Allure report generated successfully."
           echo "✅ Allure report generated."
 
-      - name: 🥒 Generate Cucumber HTML report
-        if: success() || failure()
-        run: |
-          echo "Generating Cucumber HTML report..."
-          if ! npm run report:bdd; then
-            echo "❌ Cucumber HTML report generation failed."
-            echo "Possible reasons:"
-            echo "- The 'report:bdd' script is missing from package.json"
-            echo "- No cucumber JSON results were produced by the test run"
-            exit 1
-          fi
-          ls -R cucumber-html-report || echo "⚠️ cucumber-html-report folder not found."
-          echo "✅ Cucumber report generated."
-
       # ---------------------------------------------------------------
       # 8. ARTIFACT UPLOAD
       # ---------------------------------------------------------------
@@ -467,6 +453,24 @@ jobs:
           echo "deploy_url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
           echo "✅ Netlify deployment completed."
           echo "Deployed URL: $DEPLOY_URL"
+
+      - name: 🥒 Generate Cucumber HTML report
+        id: cucumber-report
+        if: success() # only bother building this if tests actually ran and Netlify already deployed above
+        run: |
+          echo "Generating Cucumber HTML report..."
+          if ! npm run report:bdd; then
+            echo "❌ Cucumber HTML report generation failed."
+            echo "Possible reasons:"
+            echo "- The 'report:bdd' script is missing from package.json"
+            echo "- No cucumber JSON results were produced by the test run"
+            echo ""
+            echo "Note: this only blocks the GitHub Pages deploy below —"
+            echo "the Netlify Allure report has already been deployed."
+            exit 1
+          fi
+          ls -R cucumber-html-report || echo "⚠️ cucumber-html-report folder not found."
+          echo "✅ Cucumber report generated."
 
       - name: 🌐 Deploy Cucumber HTML report to GitHub Pages
         id: gh-pages-deploy
