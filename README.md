@@ -14,7 +14,7 @@ End-to-end test automation framework built with **Playwright**, **playwright-bdd
     - [`.prettierrc.json`](#prettierrcjson)
     - [Run Prettier](#run-prettier)
   - [Linting — ESLint](#linting--eslint)
-    - [`eslint.config.ts`](#eslintconfigts)
+    - [`eslint.config.mts`](#eslintconfigmts)
     - [Run ESLint](#run-eslint)
   - [Gherkin Linting](#gherkin-linting)
   - [Git Hooks — Husky \& lint-staged](#git-hooks--husky--lint-staged)
@@ -136,7 +136,7 @@ During `eslint --init`, the following prompts/choices were used:
 
 Required dependencies installed by the wizard: `eslint`, `@eslint/js`, `globals`, `typescript-eslint`, `@eslint/json`, `jiti`.
 
-### `eslint.config.ts`
+### `eslint.config.mts`
 
 Replace the generated default config with the following:
 
