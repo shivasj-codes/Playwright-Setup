@@ -10,17 +10,24 @@ End-to-end test automation framework built with **Playwright**, **playwright-bdd
   - [Table of Contents](#table-of-contents)
   - [Reference Learning Resources](#reference-learning-resources)
   - [Project Setup](#project-setup)
+  - [Configuration Files](#configuration-files)
+    - [`package.json` (fully annotated)](#packagejson-fully-annotated)
+      - [Script-by-script explanation](#script-by-script-explanation)
+      - [`lint-staged` block explanation](#lint-staged-block-explanation)
+      - [Dependency groups explanation](#dependency-groups-explanation)
+    - [`playwright.config.ts` (fully annotated)](#playwrightconfigts-fully-annotated)
+      - [Section-by-section explanation](#section-by-section-explanation)
   - [Code Formatting — Prettier](#code-formatting--prettier)
     - [`.prettierrc.json`](#prettierrcjson)
     - [Run Prettier](#run-prettier)
   - [Linting — ESLint](#linting--eslint)
     - [`eslint.config.mts`](#eslintconfigmts)
+      - [What each part of this config does](#what-each-part-of-this-config-does)
     - [Run ESLint](#run-eslint)
   - [Gherkin Linting](#gherkin-linting)
   - [Git Hooks — Husky \& lint-staged](#git-hooks--husky--lint-staged)
     - [Husky](#husky)
     - [lint-staged](#lint-staged)
-  - [package.json Scripts](#packagejson-scripts)
   - [Test Reporting — Allure](#test-reporting--allure)
     - [Install](#install)
     - [Configure reporter (`playwright.config.ts`)](#configure-reporter-playwrightconfigts)
@@ -29,10 +36,12 @@ End-to-end test automation framework built with **Playwright**, **playwright-bdd
   - [Test Reporting — Cucumber HTML](#test-reporting--cucumber-html)
   - [Multiple Cucumber HTML Reporter](#multiple-cucumber-html-reporter)
     - [`generate-report.ts`](#generate-reportts)
+      - [What this script does, step by step](#what-this-script-does-step-by-step)
     - [Run](#run)
   - [CI/CD — GitHub Actions Workflow](#cicd--github-actions-workflow)
     - [Branch → Environment mapping](#branch--environment-mapping)
     - [Full workflow file](#full-workflow-file)
+      - [What the workflow does, job by job](#what-the-workflow-does-job-by-job)
     - [Required GitHub Secrets](#required-github-secrets)
   - [Accessibility Testing](#accessibility-testing)
     - [Why does Playwright BDD throw: _"When using several calls of defineBddConfig(), please manually provide different outputDir"_?](#why-does-playwright-bdd-throw-when-using-several-calls-of-definebddconfig-please-manually-provide-different-outputdir)
@@ -56,11 +65,314 @@ Initialize a new Playwright project:
 npm init playwright@latest
 ```
 
+_What this does:_ scaffolds a fresh Playwright project — creates `playwright.config.ts`, a `tests/` folder with an example spec, installs `@playwright/test`, and downloads the browser binaries (Chromium/Firefox/WebKit).
+
 Add BDD (Cucumber/Gherkin) support on top of Playwright:
 
 ```bash
 npm i -D playwright-bdd
 ```
+
+_What this does:_ installs `playwright-bdd` as a dev dependency. This is the library that lets you write tests as `.feature` files (Gherkin syntax: `Given/When/Then`) and auto-generates the actual Playwright spec files from them.
+
+---
+
+## Configuration Files
+
+These are the two files that drive the whole framework. Every setting below is explained in plain English so anyone opening the repo later understands _why_ a line exists, not just what it does.
+
+### `package.json` (fully annotated)
+
+```json
+{
+  "name": "playwright-setup",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "lint:ts": "eslint \"tests/**/*.{ts,js}\"",
+    "lint:feature": "node lint-features.js",
+    "lint": "npm run lint:ts && npm run lint:feature",
+    "lint:fix": "eslint \"tests/**/*.{ts,js}\" --fix",
+    "prepare": "husky",
+    "format": "prettier --check .",
+    "format:fix": "prettier --write .",
+    "test": "npx bddgen && npx playwright test",
+    "allure-report": "allure generate allure-results --clean -o allure-report && allure open allure-report",
+    "multiple-cucumber-report:bdd": "npx ts-node generate-report.ts"
+  },
+  "lint-staged": {
+    "*.ts": ["eslint --fix tests/**/*.ts", "prettier --write tests/**/*.ts"],
+    "*.feature": ["node lint-features.js", "prettier --write"],
+    "*.{json,md}": ["prettier --write"]
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@eslint/json": "^2.0.1",
+    "@playwright/test": "^1.61.1",
+    "@types/node": "^26.1.1",
+    "@typescript-eslint/eslint-plugin": "^8.64.0",
+    "@typescript-eslint/parser": "^8.64.0",
+    "allure-commandline": "^2.43.0",
+    "allure-playwright": "^3.10.2",
+    "eslint": "^10.7.0",
+    "eslint-plugin-playwright": "^2.10.5",
+    "gherkin-lint-plus": "^1.0.2",
+    "glob": "^13.0.6",
+    "globals": "^17.7.0",
+    "husky": "^9.1.7",
+    "jiti": "^2.7.0",
+    "lint-staged": "^16.4.0",
+    "multiple-cucumber-html-reporter": "^3.10.0",
+    "netlify-cli": "^27.0.0",
+    "playwright-bdd": "^9.2.0",
+    "prettier": "3.9.5",
+    "prettier-plugin-gherkin": "^4.0.0",
+    "typescript-eslint": "^8.64.0"
+  },
+  "dependencies": {
+    "@axe-core/playwright": "^4.12.1"
+  }
+}
+```
+
+#### Script-by-script explanation
+
+| Script                         | Command it runs                                                                        | What it actually does                                                                                                                                                                                                                |
+| ------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `lint:ts`                      | `eslint "tests/**/*.{ts,js}"`                                                          | Checks every `.ts`/`.js` file under `tests/` against the ESLint rules and **reports** problems (does not fix anything).                                                                                                              |
+| `lint:feature`                 | `node lint-features.js`                                                                | Runs a custom Node script (`lint-features.js`, project-specific) that lints `.feature` (Gherkin) files — e.g. catching missing scenario titles, bad indentation, duplicate step text.                                                |
+| `lint`                         | `npm run lint:ts && npm run lint:feature`                                              | Runs both linters back to back. The `&&` means `lint:feature` only runs if `lint:ts` passes — this is the "run everything and fail fast" command, typically used in CI.                                                              |
+| `lint:fix`                     | `eslint "tests/**/*.{ts,js}" --fix`                                                    | Same as `lint:ts` but with `--fix`, so ESLint automatically rewrites the file wherever it can safely auto-correct a violation (e.g. missing semicolons, unused imports).                                                             |
+| `prepare`                      | `husky`                                                                                | npm automatically runs any script named `prepare` right after `npm install`. This is what wires up the Husky Git hooks (like pre-commit) on a fresh clone of the repo — nobody has to remember to run it manually.                   |
+| `format`                       | `prettier --check .`                                                                   | Scans the whole repo and tells you which files are **not** formatted according to `.prettierrc.json`, but doesn't change anything. Good for CI — it can fail the build if formatting drifted.                                        |
+| `format:fix`                   | `prettier --write .`                                                                   | Same scan, but actually rewrites every file to match the Prettier style. Run this locally before committing.                                                                                                                         |
+| `test`                         | `npx bddgen && npx playwright test`                                                    | Two-step: `bddgen` reads your `.feature` files + step definitions and generates the real Playwright `.spec.ts` files from them, **then** `playwright test` executes those generated specs. This is the main "run all tests" command. |
+| `allure-report`                | `allure generate allure-results --clean -o allure-report && allure open allure-report` | Takes the raw result files Playwright wrote into `allure-results/` during the test run, builds a browsable HTML report into `allure-report/` (`--clean` wipes any old report first), then opens it in your default browser.          |
+| `multiple-cucumber-report:bdd` | `npx ts-node generate-report.ts`                                                       | Runs the custom `generate-report.ts` script (documented in [Multiple Cucumber HTML Reporter](#multiple-cucumber-html-reporter) below) which reads the Cucumber JSON results and builds a polished, metadata-rich HTML dashboard.     |
+
+#### `lint-staged` block explanation
+
+`lint-staged` only runs tools against files that are **currently staged for commit** (i.e. `git add`ed), not the whole repo — this keeps pre-commit checks fast.
+
+```json
+"lint-staged": {
+  "*.ts": [
+    "eslint --fix tests/**/*.ts",
+    "prettier --write tests/**/*.ts"
+  ],
+  "*.feature": [
+    "node lint-features.js",
+    "prettier --write"
+  ],
+  "*.{json,md}": [
+    "prettier --write"
+  ]
+}
+```
+
+- **`*.ts`** staged → auto-fix lint issues, then reformat with Prettier.
+- **`*.feature`** staged → run the custom Gherkin linter, then reformat with Prettier (using the `prettier-plugin-gherkin` plugin).
+- **`*.json` / `*.md`** staged → just reformat with Prettier (JSON and Markdown don't need linting, only consistent formatting).
+
+This block is read automatically by `lint-staged` when Husky's pre-commit hook calls `npx lint-staged` — so bad formatting/lint errors get caught **before** they're ever committed.
+
+#### Dependency groups explanation
+
+- **`devDependencies`** — tools only needed while _developing and running_ tests (linters, formatters, test runner, report generators, Git hooks). These are never needed in a production app, which is why they're kept separate from `dependencies`.
+- **`dependencies`** — currently only `@axe-core/playwright`, the accessibility-testing engine. It's listed as a regular dependency (not dev) because in some setups accessibility checks are treated as part of the shippable test suite itself rather than a pure dev-time tool — either placement works, this is just how it's currently split in this project.
+
+---
+
+### `playwright.config.ts` (fully annotated)
+
+```ts
+import { defineConfig, devices } from '@playwright/test';
+import { defineBddConfig, cucumberReporter } from 'playwright-bdd';
+
+/**
+ * Read environment variables from file.
+ * https://github.com/motdotla/dotenv
+ */
+// import dotenv from 'dotenv';
+// import path from 'path';
+// dotenv.config({ path: path.resolve(__dirname, '.env') });
+
+/**
+ * See https://playwright.dev/docs/test-configuration.
+ */
+
+const testDir = defineBddConfig({
+  features: 'tests/UI_Test/feature/**/*.feature',
+  steps: [
+    'tests/UI_Test/steps/**/*.steps.ts',
+    'tests/UI_Test/fixture/fixtures.ts',
+  ],
+});
+
+const testAccessDir = defineBddConfig({
+  features: 'tests/Accessibility_Test/feature/**/*.feature',
+  steps: [
+    'tests/Accessibility_Test/steps/**/*.steps.ts',
+    'tests/Accessibility_Test/fixture/fixtures.ts',
+  ],
+  outputDir: 'accessibility-results',
+});
+
+export default defineConfig({
+  testDir,
+  /* Run tests in files in parallel */
+  fullyParallel: true,
+  /* Fail the build on CI if you accidentally left test.only in the source code. */
+  forbidOnly: !!process.env.CI,
+  /* Retry on CI only */
+  retries: process.env.CI ? 2 : 0,
+  /* Opt out of parallel tests on CI. */
+  workers: process.env.CI ? 1 : undefined,
+  /* Reporter to use. See https://playwright.dev/docs/test-reporters */
+  reporter: [
+    ['html'],
+    ['allure-playwright'],
+    cucumberReporter('html', { outputFile: 'cucumber-report/index.html' }),
+    cucumberReporter('json', { outputFile: 'cucumber-report/result.json' }),
+  ],
+  /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
+  use: {
+    /* Base URL to use in actions like `await page.goto('')`. */
+    // baseURL: 'http://localhost:3000',
+    baseURL: 'https://ecommerce-playground.lambdatest.io/',
+
+    /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
+    trace: 'on-first-retry',
+    screenshot: 'on',
+    video: 'on',
+  },
+
+  /* Configure projects for major browsers */
+  projects: [
+    {
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'] },
+    },
+
+    {
+      name: 'accessibility-test',
+      testDir: testAccessDir,
+      use: { ...devices['Desktop Firefox'] },
+    },
+
+    // {
+    //   name: "firefox",
+    //   use: { ...devices["Desktop Firefox"] },
+    // },
+
+    // {
+    //   name: "webkit",
+    //   use: { ...devices["Desktop Safari"] },
+    // },
+
+    /* Test against mobile viewports. */
+    // {
+    //   name: 'Mobile Chrome',
+    //   use: { ...devices['Pixel 5'] },
+    // },
+    // {
+    //   name: 'Mobile Safari',
+    //   use: { ...devices['iPhone 12'] },
+    // },
+
+    /* Test against branded browsers. */
+    // {
+    //   name: 'Microsoft Edge',
+    //   use: { ...devices['Desktop Edge'], channel: 'msedge' },
+    // },
+    // {
+    //   name: 'Google Chrome',
+    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
+    // },
+  ],
+
+  /* Run your local dev server before starting the tests */
+  // webServer: {
+  //   command: 'npm run start',
+  //   url: 'http://localhost:3000',
+  //   reuseExistingServer: !process.env.CI,
+  // },
+});
+```
+
+#### Section-by-section explanation
+
+**Imports**
+
+- `defineConfig`, `devices` — Playwright's own config helper and its library of preset device profiles (e.g. `'Desktop Chrome'`, `'iPhone 12'`) so you don't have to hand-write viewport sizes and user agents.
+- `defineBddConfig`, `cucumberReporter` — from `playwright-bdd`. `defineBddConfig` is what converts a folder of `.feature` files + step definitions into a real Playwright test directory. `cucumberReporter` is a reporter factory used further down.
+
+**The commented-out `dotenv` block**
+Left in as a ready-to-use snippet. If the project later needs secrets or environment-specific values (like different base URLs per environment) pulled from a local `.env` file instead of hardcoding them, uncomment these three lines and they'll load automatically before the config is evaluated.
+
+**`testDir` — the main UI test BDD config**
+
+```ts
+const testDir = defineBddConfig({
+  features: 'tests/UI_Test/feature/**/*.feature',
+  steps: [
+    'tests/UI_Test/steps/**/*.steps.ts',
+    'tests/UI_Test/fixture/fixtures.ts',
+  ],
+});
+```
+
+- `features` — glob pattern telling `playwright-bdd` where to find `.feature` files for the main UI suite.
+- `steps` — glob patterns for the step-definition files (the TypeScript code that implements each `Given/When/Then` line) **and** the fixtures file (shared setup/teardown logic, e.g. custom `page` objects, auth state).
+- No `outputDir` is set here, so `playwright-bdd` uses its default hidden folder, `.features-gen`, to write the generated spec files. This is why the CI workflow's "verify generated spec files" step looks in `.features-gen` first.
+
+**`testAccessDir` — the accessibility BDD config**
+
+```ts
+const testAccessDir = defineBddConfig({
+  features: 'tests/Accessibility_Test/feature/**/*.feature',
+  steps: [
+    'tests/Accessibility_Test/steps/**/*.steps.ts',
+    'tests/Accessibility_Test/fixture/fixtures.ts',
+  ],
+  outputDir: 'accessibility-results',
+});
+```
+
+Same idea as above but for a **separate** accessibility test suite. It **must** have its own `outputDir` (`accessibility-results`) — this is exactly the "please manually provide different outputDir" situation described in [Accessibility Testing](#accessibility-testing). Without a distinct `outputDir`, `playwright-bdd` can't tell which generated files belong to the UI suite vs. the accessibility suite and throws an error.
+
+**Top-level `defineConfig({...})` options**
+
+| Option          | Value                               | Meaning                                                                                                                                                                                                                                                                                                                                                       |
+| --------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `testDir`       | `testDir` (the UI BDD config above) | Tells Playwright the default test directory is the generated UI test output.                                                                                                                                                                                                                                                                                  |
+| `fullyParallel` | `true`                              | Runs test files in parallel workers instead of one at a time — much faster locally and in CI.                                                                                                                                                                                                                                                                 |
+| `forbidOnly`    | `!!process.env.CI`                  | If someone left `test.only(...)` in a spec (which restricts a run to just that one test), this makes the whole test run **fail** when `CI` is set — a safety net so a debugging leftover never silently skips the rest of the suite in a real pipeline run.                                                                                                   |
+| `retries`       | `process.env.CI ? 2 : 0`            | On CI, flaky tests get retried up to 2 times before being marked failed. Locally, no retries — you want to see failures immediately while developing.                                                                                                                                                                                                         |
+| `workers`       | `process.env.CI ? 1 : undefined`    | On CI, runs one worker at a time (safer/more predictable on shared runners with limited resources). Locally, Playwright picks a sensible number of parallel workers automatically.                                                                                                                                                                            |
+| `reporter`      | array of 4 reporters                | Playwright supports multiple reporters running simultaneously. Here: the built-in `html` report, the `allure-playwright` reporter (feeds the Allure dashboard), and two Cucumber reporters — one producing a standalone Cucumber HTML file, one producing the raw JSON that `generate-report.ts` later reads to build the "Multiple Cucumber HTML" dashboard. |
+
+**`use` block — settings shared by every project below**
+
+| Option       | Value                                           | Meaning                                                                                                                                                                                                                                                                 |
+| ------------ | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `baseURL`    | `'https://ecommerce-playground.lambdatest.io/'` | Every relative `page.goto('/some-page')` call resolves against this URL, so tests don't need to hardcode the full domain everywhere. The `localhost:3000` line above it is commented out — swap the two when testing a local dev build instead of the hosted demo site. |
+| `trace`      | `'on-first-retry'`                              | Playwright only records a full trace (a step-by-step timeline you can replay in the Trace Viewer) the **first time** a test is retried after failing — keeps disk usage low while still capturing debugging info for actual failures.                                   |
+| `screenshot` | `'on'`                                          | Takes a screenshot for every test, pass or fail (not just failures) — useful for visual review/reporting, though it does mean more storage used than `'only-on-failure'`.                                                                                               |
+| `video`      | `'on'`                                          | Records video for every test run, same trade-off as above: more disk usage, but full visual playback available for anything, not just failures.                                                                                                                         |
+
+**`projects` array — different browser/suite combinations**
+
+- `chromium` — the main UI suite (inherits `testDir` from the top level) runs in Desktop Chrome.
+- `accessibility-test` — overrides `testDir` to point at the accessibility BDD output (`testAccessDir`) and runs it in Desktop Firefox instead of Chrome.
+- Everything else (`firefox`, `webkit`, mobile viewports, branded browsers like Edge/Chrome) is commented out — these are ready-made presets from the default Playwright scaffold, kept as reference. Uncomment any of them to add that browser/device to the test matrix.
+
+**`webServer` block (commented out)**
+Another ready-to-use snippet — if this project ever needs Playwright to boot a local dev server before running tests (and shut it down after), uncomment this and point `command`/`url` at the app.
 
 ---
 
@@ -74,12 +386,16 @@ Install an exact, pinned Prettier version:
 npm install --save-dev --save-exact prettier@3.9.5
 ```
 
+_What this does:_ installs Prettier as a dev dependency, and `--save-exact` locks the version in `package.json` to precisely `3.9.5` (no `^` or `~` range) so formatting output never silently changes because of an automatic minor/patch update.
+
 Install the Gherkin plugin for Prettier so `.feature` files get formatted too:
 Package: https://www.npmjs.com/package/prettier-plugin-gherkin
 
 ```bash
 npm i -D prettier-plugin-gherkin
 ```
+
+_What this does:_ Prettier doesn't understand Gherkin syntax out of the box — this plugin teaches it how, so `.feature` files get consistent indentation and spacing too.
 
 ### `.prettierrc.json`
 
@@ -91,11 +407,17 @@ npm i -D prettier-plugin-gherkin
 }
 ```
 
+- `plugins` — loads the Gherkin plugin installed above.
+- `singleQuote` — use `'single quotes'` instead of `"double quotes"` in JS/TS.
+- `trailingComma: "es5"` — adds trailing commas where valid in ES5 (arrays, objects) but not in places only newer JS supports (like function arguments), for cleaner git diffs.
+
 ### Run Prettier
 
 ```bash
 npx prettier . --write
 ```
+
+_What this does:_ reformats every file in the project (respecting `.prettierrc.json` and any `.prettierignore`) in place.
 
 ---
 
@@ -107,11 +429,15 @@ Install ESLint with the TypeScript parser/plugin and the Playwright plugin:
 npm install eslint @typescript-eslint/parser @typescript-eslint/eslint-plugin eslint-plugin-playwright --save-dev
 ```
 
+_What this does:_ installs the core ESLint engine, the parser/plugin pair that lets ESLint understand TypeScript syntax and apply TS-specific rules, and a Playwright-specific plugin (catches Playwright anti-patterns, like using `page.pause()` or a standalone `expect()` outside a test).
+
 Initialize the ESLint config:
 
 ```bash
 npx eslint --init
 ```
+
+_What this does:_ launches ESLint's interactive setup wizard, which asks a series of questions (shown below) and generates a starter config file plus installs whatever dependencies your answers require.
 
 You can also run this directly via:
 
@@ -196,6 +522,20 @@ export default defineConfig([
 ]);
 ```
 
+#### What each part of this config does
+
+- **`files: ['**/*.{js,mjs,cjs,ts,mts,cts}']`** — this block applies to every JS/TS file variant in the repo.
+- **`languageOptions.parser: tseslint.parser`** — tells ESLint to parse files using the TypeScript parser (understands types, interfaces, generics, etc.) instead of the default JS-only parser.
+- **`languageOptions.globals`** — declares which global variables are allowed without an "undefined variable" error — both browser globals (`window`, `document`) and Node globals (`process`, `__dirname`), since Playwright tests run in Node but interact with browser pages.
+- **`extends`** — layers three rule sets on top of each other: ESLint's own recommended rules, the TypeScript-ESLint recommended rules, and `eslint-plugin-playwright`'s recommended rules (catches things like unused `page.click()` results or missing `await`).
+- **`rules` overrides:**
+  - `@typescript-eslint/no-var-requires: 'off'` and `@typescript-eslint/no-require-imports: 'off'` — normally TypeScript-ESLint discourages old-style `require(...)` in favor of `import`, but this project intentionally allows `require()` in a couple of places (e.g. `generate-report.ts` needs it for a package without TS types — see [Multiple Cucumber HTML Reporter](#multiple-cucumber-html-reporter)), so both rules are turned off project-wide.
+  - `'import/no-commonjs': 'off'` — same reasoning, allows CommonJS-style imports.
+  - `'no-await-in-loop': 'off'` — normally flagged as a performance smell, but test setup/step code often legitimately needs to `await` sequentially inside a loop (e.g. filling multiple form fields one at a time), so it's disabled.
+  - `'playwright/no-standalone-expect': 'off'` — allows calling `expect()` outside of a `test()` block, which is common in BDD step definitions where assertions live in separate step files rather than inline in a `test(...)` callback.
+  - `'no-restricted-syntax'` with a custom selector — this is a hand-written rule that specifically bans `page.pause()` (Playwright's interactive debug-pause command) anywhere in the codebase, with a clear custom error message. This stops someone from accidentally committing a debugging pause that would freeze CI.
+- **The second block (`files: ['**/*.json']`)** — applies separate JSON-specific linting (checks for valid JSON syntax/structure) and explicitly excludes `node_modules`.
+
 Reference: https://www.npmjs.com/package/eslint-plugin-playwright
 
 ### Run ESLint
@@ -203,6 +543,8 @@ Reference: https://www.npmjs.com/package/eslint-plugin-playwright
 ```bash
 npx eslint "tests/**/*.ts"
 ```
+
+_What this does:_ lints every `.ts` file under `tests/` and prints any rule violations to the terminal.
 
 ---
 
@@ -215,11 +557,15 @@ Package: https://www.npmjs.com/package/gherkin-lint-plus
 npm i gherkin-lint-plus --save-dev
 ```
 
+_What this does:_ installs a linter specifically for `.feature` (Gherkin) files — checks things like scenario naming, step formatting, and duplicate/orphaned steps.
+
 Run it against all feature files:
 
 ```bash
 npx gherkin-lint-plus "tests/***/***/***.feature"
 ```
+
+_What this does:_ scans every `.feature` file (three levels deep, matching this project's `tests/<SuiteName>/feature/*.feature` structure) and reports Gherkin style/syntax issues.
 
 ---
 
@@ -228,12 +574,15 @@ npx gherkin-lint-plus "tests/***/***/***.feature"
 ### Husky
 
 Docs: https://typicode.github.io/husky/get-started.html
+
 Package: https://www.npmjs.com/package/husky
 
 ```bash
 npm install --save-dev husky
 npx husky init
 ```
+
+_What this does:_ `husky` lets you run scripts automatically at Git lifecycle points (like right before a commit is created). `husky init` creates the `.husky/` folder and a default `pre-commit` hook file, and adds the `"prepare": "husky"` script to `package.json` (already present above) so every teammate gets the same hooks automatically after `npm install`.
 
 ### lint-staged
 
@@ -243,46 +592,15 @@ Package: https://www.npmjs.com/package/lint-staged
 npm install --save-dev lint-staged
 ```
 
+_What this does:_ installs the tool that only runs linters/formatters against files that are staged for commit (see the `lint-staged` block in `package.json`, explained above), rather than the whole repo — makes pre-commit checks fast.
+
 Run it manually (also wired into Husky's pre-commit hook):
 
 ```bash
 npx lint-staged
 ```
 
----
-
-## package.json Scripts
-
-```json
-"scripts": {
-  "lint:ts": "eslint \"tests/**/*.{ts,js}\"",
-  "lint:feature": "node lint-features.js",
-  "lint": "npm run lint:ts && npm run lint:feature",
-  "lint:fix": "eslint \"tests/**/*.{ts,js}\" --fix",
-  "prepare": "husky",
-  "format": "prettier --check .",
-  "format:fix": "prettier --write .",
-  "test": "npx bddgen && npx playwright test",
-  "allure-report": "allure generate allure-results --clean -o allure-report && allure open allure-report",
-  "report:bdd": "npx ts-node generateReport.ts"
-}
-```
-
-```json
-"lint-staged": {
-  "*.ts": [
-    "eslint --fix tests/**/*.ts",
-    "prettier --write tests/**/*.ts"
-  ],
-  "*.feature": [
-    "node lint-features.js",
-    "prettier --write"
-  ],
-  "*.{json,md}": [
-    "prettier --write"
-  ]
-}
-```
+_What this does:_ runs the same checks Husky's pre-commit hook would run, on demand — useful to test your `lint-staged` config without actually making a commit.
 
 ---
 
@@ -302,11 +620,15 @@ npm install --save-dev allure-commandline
 npm install --save-dev @playwright/test allure-playwright
 ```
 
+_What this does:_ `allure-commandline` is the CLI tool that turns raw result files into an HTML report (`allure generate`/`allure open`). `allure-playwright` is the Playwright reporter plugin that writes those raw result files in the format Allure expects during a test run.
+
 ### Configure reporter (`playwright.config.ts`)
 
 ```ts
 reporter: [['html'], ['allure-playwright']],
 ```
+
+_What this does:_ tells Playwright to produce two reports simultaneously — its own built-in HTML report, and Allure's raw result files (later turned into a report with the commands below). See the fully annotated config above for how this evolved into the 4-reporter array actually used in this project.
 
 ### Run and generate
 
@@ -316,17 +638,23 @@ npx allure generate
 npx allure open
 ```
 
+_What this does:_ runs the test suite (writing raw results into `allure-results/`), builds the browsable Allure HTML report from those results, then opens it in your browser.
+
 Or serve directly without a separate generate step:
 
 ```bash
 npx allure serve
 ```
 
+_What this does:_ generates the report into a temporary folder and opens it immediately — convenient for a one-off local look, but not meant for keeping/publishing the report (use `generate` + a fixed output folder for that, as the CI workflow does).
+
 ### Netlify CLI (for deploying the Allure report)
 
 ```bash
 npm i netlify-cli --save-dev
 ```
+
+_What this does:_ installs the command-line tool used later in the CI workflow (`npx netlify deploy ...`) to publish the generated Allure report as a live, shareable website.
 
 ---
 
@@ -344,6 +672,8 @@ reporter: [
 ],
 ```
 
+_What this does:_ `cucumberReporter` (from `playwright-bdd`) writes a standalone Cucumber-style HTML report — the format testers/BDD stakeholders are often already used to reading, independent of Allure.
+
 ---
 
 ## Multiple Cucumber HTML Reporter
@@ -353,6 +683,8 @@ Package: https://www.npmjs.com/package/multiple-cucumber-html-reporter
 ```bash
 npm i multiple-cucumber-html-reporter --save-dev
 ```
+
+_What this does:_ installs a report generator that builds a more polished, metadata-rich Cucumber dashboard (with charts, environment info, feature/scenario counts) than the basic Cucumber HTML reporter above — it reads a Cucumber **JSON** results file as its input, which is why the next step adds a JSON reporter too.
 
 Update the reporter list in `playwright.config.ts` to also emit a JSON result file (consumed by the report generator below):
 
@@ -488,11 +820,24 @@ report.generate({
 });
 ```
 
+#### What this script does, step by step
+
+1. **Imports (`os`, `child_process`, `fs`, `path`)** — Node built-ins used to gather machine/environment info and read files. No installation needed for these.
+2. **`require(...)` for `multiple-cucumber-html-reporter` and `playwright-core/package.json`** — uses old-style `require` instead of `import` specifically because the reporter package has no TypeScript type definitions, and reading `package.json` as an ES module would need a tsconfig setting the project doesn't want to depend on. This is exactly why `'@typescript-eslint/no-require-imports': 'off'` was set in the ESLint config above.
+3. **Environment detection block** — captures the OS name/version, machine hostname, and installed Node.js version, purely to display them in the final report's metadata panel.
+4. **Git branch detection** — runs `git rev-parse --abbrev-ref HEAD` as a shell command to get the current branch name; if it fails (e.g. not in a git repo), it falls back to the string `'unknown'` instead of crashing the script.
+5. **TypeScript interfaces (`CucumberStep`, `CucumberElement`, `CucumberFeature`)** — describe just enough of the Cucumber JSON structure to safely count features/scenarios/steps, without having to fully type every field the JSON report contains.
+6. **Reading and counting** — loads `cucumber-report/result.json` (written by the `cucumberReporter('json', ...)` entry in `playwright.config.ts`), parses it, and tallies how many features, scenarios, and steps it contains.
+7. **`isCI` check** — `process.env.CI` is a variable that GitHub Actions (and most CI systems) automatically set to `'true'` during a pipeline run. This is used so the report generator **only auto-opens a browser window when run locally** — trying to open a browser on a headless CI runner would just fail or hang.
+8. **`report.generate({...})`** — the actual call into `multiple-cucumber-html-reporter`, passing in the JSON location, output folder, display options, and all the metadata/custom data gathered above, producing the final HTML dashboard.
+
 ### Run
 
 ```bash
 npx ts-node generate-report.ts
 ```
+
+_What this does:_ executes the script above directly using `ts-node` (runs TypeScript without a separate compile step). In `package.json` this is wired up as the `multiple-cucumber-report:bdd` script.
 
 ---
 
@@ -1087,6 +1432,24 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 ```
 
+#### What the workflow does, job by job
+
+**Job 1 — `determine-environment`**
+Figures out which deployment environment (development/qa/uat/production/preview) this run targets, purely from the branch name or manual input, and "sanitizes" the branch name (strips characters that aren't safe in a URL, filename, or Netlify alias) so it can be reused later. This runs as a tiny, fast, dependency-free job so the mapping logic is easy to read and test in isolation.
+
+**Job 2 — `test`** (the heavy lifting)
+
+1. **Metadata & banner** — records the start time and prints a readable summary of what's about to run (branch, environment, commit, trigger).
+2. **Checkout & runtime setup** — pulls the repo code, installs the pinned Node.js version, and installs Java (required only because the Allure CLI is a Java tool).
+3. **Framework validation (fail fast)** — before spending any real CI time, checks that required secrets (`NETLIFY_AUTH_TOKEN`, `NETLIFY_SITE_ID`) exist and that at least one `.feature` file is present. If either check fails, the job stops immediately with a clear reason instead of failing confusingly later.
+4. **Dependency installation** — `npm ci` (a stricter, reproducible version of `npm install` that uses `package-lock.json` exactly) followed by a global `ts-node` install.
+5. **BDD generation & verification** — runs `bddgen` to turn `.feature` files into real spec files, then double-checks that files actually landed where expected, printing detailed diagnostics if not.
+6. **Playwright execution** — installs browser binaries (cheap safety check since the Docker image should already have them) and runs the test suite.
+7. **Report generation** — installs the Allure CLI and builds the Allure HTML report. This step runs `if: success() || failure()` — meaning it runs whether tests passed or failed, because a report is most valuable exactly when something broke.
+8. **Artifact upload** — uploads the Allure report as a downloadable GitHub Actions artifact (kept for 30 days), regardless of outcome (`if: always()`).
+9. **Deployment** — pushes the Allure report to Netlify (gets a live URL, aliased to the branch name) and the Cucumber report to GitHub Pages (published under a path scoped to environment + branch). If it's a pull request, posts both report links as a PR comment automatically.
+10. **Summary** — prints timing and report links both to the console and to the GitHub Actions run summary page (`$GITHUB_STEP_SUMMARY`), so anyone opening the run can see the results without digging through logs.
+
 ### Required GitHub Secrets
 
 Set under **GitHub Project Settings → Secrets and Variables → Actions → Repository secrets**:
@@ -1110,13 +1473,13 @@ Recommended tools:
 
 This error occurs because multiple `defineBddConfig()` calls are attempting to generate BDD test files into the same output directory. Playwright BDD requires each configuration to have a unique output location so generated files don't overwrite or conflict with one another. If multiple configurations share the same output directory, Playwright BDD cannot distinguish which generated files belong to which configuration, so it throws this error.
 
-**Fix:** give each configuration a different `outputDir`, or use the `defineBddProject()` helper to manage multiple BDD projects.
+**Fix:** give each configuration a different `outputDir`, or use the `defineBddProject()` helper to manage multiple BDD projects. This is exactly why, in the annotated `playwright.config.ts` above, `testAccessDir` explicitly sets `outputDir: 'accessibility-results'` while `testDir` (the main UI suite) uses the library's default.
 
 ```ts
 const testAccessDir = defineBddConfig({
-  features: 'tests/Accessibility_Test/feature/***.feature',
+  features: 'tests/Accessibility_Test/feature/**/*.feature',
   steps: [
-    'tests/Accessibility_Test/steps/***.steps.ts',
+    'tests/Accessibility_Test/steps/**/*.steps.ts',
     'tests/Accessibility_Test/fixture/fixtures.ts',
   ],
   outputDir: 'accessibility-results',
@@ -1133,6 +1496,8 @@ Add a corresponding project in `playwright.config.ts`:
 },
 ```
 
+_What this does:_ registers a separate Playwright "project" that runs only the accessibility suite's generated tests, in Firefox instead of the main suite's Chrome — so accessibility checks run independently and can be filtered/run on their own (`npx playwright test --project=accessibility-test`).
+
 ### `@axe-core/playwright`
 
 Package: https://www.npmjs.com/package/@axe-core/playwright
@@ -1140,6 +1505,8 @@ Package: https://www.npmjs.com/package/@axe-core/playwright
 ```bash
 npm i @axe-core/playwright
 ```
+
+_What this does:_ installs the accessibility-testing engine (built on the industry-standard `axe-core` rules) with a Playwright-native API, so tests can run automated WCAG checks against a page and assert there are zero violations.
 
 ---
 
@@ -1154,5 +1521,3 @@ npm i @axe-core/playwright
 | GitHub Pages deploy fails              | Pages not enabled, branch protection on `gh-pages`, or `GITHUB_TOKEN` lacks `contents: write` | Enable Pages, check branch protection rules and workflow permissions     |
 
 ---
-
-_This document consolidates the framework's setup notes for Playwright + BDD (Cucumber/Gherkin), code quality tooling (Prettier, ESLint, gherkin-lint-plus), Git hooks (Husky, lint-staged), test reporting (Allure, Cucumber HTML, Multiple Cucumber HTML Reporter), CI/CD (GitHub Actions), and accessibility testing (axe-core)._
