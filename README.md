@@ -54,6 +54,7 @@ End-to-end test automation framework built with **Playwright**, **playwright-bdd
 
 - Playwright learning repo: https://github.com/TestRoverAutomation/Playwright_Learning
 - Playwright video playlist: https://youtube.com/playlist?list=PLf8vT0W16iNP7PVpW1lXuUNFmTBjAGm4V&si=r5z07tDGq-f97mfj
+- Pothiwalapranav medium: https://medium.com/@pothiwalapranav
 
 ---
 
